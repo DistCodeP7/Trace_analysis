@@ -9,7 +9,7 @@ import (
 
 func main() {
 	processes := []string{"A", "B", "C"}
-	trace := messages.GenerateAsyncTrace(processes, 30)
+	trace := messages.GenerateAsyncTrace(processes, 10)
 
 	fmt.Println("Trace:")
 	fmt.Println(trace.String())

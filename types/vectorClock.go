@@ -3,6 +3,7 @@ package types
 import (
 	"fmt"
 	"maps"
+	"sort"
 	"strings"
 )
 
@@ -26,9 +27,15 @@ func DeepCopy(vc VectorClock) VectorClock {
 
 // String returns a string representation of the VectorClock
 func (vc VectorClock) String() string {
+	keys := make([]string, 0, len(vc))
+	for k := range vc {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
 	var parts []string
-	for p, v := range vc {
-		parts = append(parts, fmt.Sprintf("%s:%d", p, v))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s:%d", k, vc[k]))
 	}
 	return "<" + strings.Join(parts, ", ") + ">"
 }
