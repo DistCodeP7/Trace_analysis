@@ -40,8 +40,3 @@ func (t Trace) String() string {
 	return result
 
 }
-
-type DAG struct {
-	Nodes map[string][]string
-	Edges map[string][]string
-}

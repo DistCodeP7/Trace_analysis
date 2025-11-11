@@ -32,3 +32,23 @@ func (vc VectorClock) String() string {
 	}
 	return "<" + strings.Join(parts, ", ") + ">"
 }
+
+// Returns true if vc happens-before other.
+// 1. Checks that vc <= other and that
+// 2. At least one entry is strictly less.
+func (vc VectorClock) HappensBefore(other VectorClock) bool {
+	lessOrEqual := true
+	strictlyLess := false
+
+	for p := range vc {
+		if vc[p] > other[p] {
+			lessOrEqual = false
+			break
+		}
+		if vc[p] < other[p] {
+			strictlyLess = true
+		}
+	}
+
+	return lessOrEqual && strictlyLess
+}
