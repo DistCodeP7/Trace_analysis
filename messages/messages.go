@@ -12,8 +12,8 @@ func GenerateAsyncTrace(processes []string, numEvents int) t.Trace {
 
 	trace := make(t.Trace, 0, numEvents)
 	processClocks := make(map[string]t.VectorClock)
+	// Maps a receiver's name to a list of SEND events waiting for it
 	pendingMessages := make(map[string][]t.Event)
-	pendingEvents := []t.Event{} // global pool for asynchronous delivery
 
 	for _, p := range processes {
 		processClocks[p] = t.NewVectorClock(processes)
@@ -23,67 +23,56 @@ func GenerateAsyncTrace(processes []string, numEvents int) t.Trace {
 	messageCounter := 0
 
 	for len(trace) < numEvents {
-		// 50% chance to deliver a pending event first
-		if len(pendingEvents) > 0 && r.Intn(2) == 0 {
-			idx := r.Intn(len(pendingEvents))
-			event := pendingEvents[idx]
-			pendingEvents = append(pendingEvents[:idx], pendingEvents[idx+1:]...)
-			trace = append(trace, event)
-			continue
-		}
-
-		// Otherwise, generate a new event
-		senderProcess, action := getRandomProcessAction(processes, r, pendingMessages)
+		process, action := getRandomProcessAction(processes, r, pendingMessages)
 
 		switch action {
 		case t.EventSend:
-			receiverName := getRandomOtherProcess(r, processes, senderProcess)
+			receiverName := getRandomOtherProcess(r, processes, process)
 
-			// increment sender clock
-			senderClock := processClocks[senderProcess]
-			senderClock[senderProcess]++
+			// Increment sender's clock
+			senderClock := processClocks[process]
+			senderClock[process]++
 
 			sendEvent := t.Event{
 				Type:      t.EventSend,
-				Process:   senderProcess,
+				Process:   process,
 				VClock:    t.DeepCopy(senderClock),
 				MessageID: messageCounter,
 			}
 
-			// instead of appending immediately, queue for asynchronous delivery
+			// The send event happens now, so add it to the trace
+			trace = append(trace, sendEvent)
+			// Queue up the message for the receiver
 			pendingMessages[receiverName] = append(pendingMessages[receiverName], sendEvent)
-			pendingEvents = append(pendingEvents, sendEvent)
 			messageCounter++
 
 		case t.EventReceive:
-			if len(pendingMessages[senderProcess]) == 0 {
-				continue // cannot receive yet
-			}
-
-			// pick a random pending message for this process
-			msgIdx := r.Intn(len(pendingMessages[senderProcess]))
-			msgToReceive := pendingMessages[senderProcess][msgIdx]
-			pendingMessages[senderProcess] = append(
-				pendingMessages[senderProcess][:msgIdx],
-				pendingMessages[senderProcess][msgIdx+1:]...,
+			// This process was selected to receive a message
+			// Dequeue a random message that was sent to it
+			msgIdx := r.Intn(len(pendingMessages[process]))
+			msgToReceive := pendingMessages[process][msgIdx]
+			pendingMessages[process] = append(
+				pendingMessages[process][:msgIdx],
+				pendingMessages[process][msgIdx+1:]...,
 			)
 
-			receiverClock := processClocks[senderProcess]
-			receiverClock[senderProcess]++
-
-			// merge vector clocks
+			receiverClock := processClocks[process]
+			// 1. Increment receiver's local clock
+			receiverClock[process]++
+			// 2. Merge clocks (element-wise maximum)
 			for _, p := range processes {
 				receiverClock[p] = max(receiverClock[p], msgToReceive.VClock[p])
 			}
 
 			recvEvent := t.Event{
 				Type:      t.EventReceive,
-				Process:   senderProcess,
+				Process:   process,
 				VClock:    t.DeepCopy(receiverClock),
 				MessageID: msgToReceive.MessageID,
 			}
 
-			pendingEvents = append(pendingEvents, recvEvent)
+			// The receive event happens now, add it to the trace
+			trace = append(trace, recvEvent)
 		}
 	}
 
@@ -109,4 +98,11 @@ func getRandomOtherProcess(r *rand.Rand, processes []string, exclude string) str
 			return p
 		}
 	}
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
