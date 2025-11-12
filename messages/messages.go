@@ -99,10 +99,3 @@ func getRandomOtherProcess(r *rand.Rand, processes []string, exclude string) str
 		}
 	}
 }
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
