@@ -2,13 +2,15 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"math/rand"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
 
-// ---------- Event & Clock Structures ----------
+// ---------- types ----------
 
 type EventType int
 
@@ -17,22 +19,45 @@ const (
 	EventReceive
 )
 
+func (et EventType) String() string {
+	switch et {
+	case EventSend:
+		return "SEND"
+	case EventReceive:
+		return "RECV"
+	default:
+		return "UNKNOWN"
+	}
+}
+
 type VectorClock map[string]int
 
 func NewVectorClock(processes []string) VectorClock {
 	vc := make(VectorClock)
-	for _, p := range processes {
-		vc[p] = 0
+	for _, key := range processes {
+		vc[key] = 0
 	}
 	return vc
 }
 
-func (vc VectorClock) Copy() VectorClock {
-	cp := make(VectorClock)
-	for k, v := range vc {
-		cp[k] = v
+func DeepCopy(vc VectorClock) VectorClock {
+	newVC := make(VectorClock, len(vc))
+	maps.Copy(newVC, vc)
+	return newVC
+}
+
+func (vc VectorClock) String() string {
+	keys := make([]string, 0, len(vc))
+	for k := range vc {
+		keys = append(keys, k)
 	}
-	return cp
+	sort.Strings(keys)
+
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s:%d", k, vc[k]))
+	}
+	return strings.Join(parts, ",")
 }
 
 func (vc VectorClock) Merge(other VectorClock) {
@@ -43,66 +68,73 @@ func (vc VectorClock) Merge(other VectorClock) {
 	}
 }
 
-func (vc VectorClock) LessOrEqual(other VectorClock) bool {
-	for k, v := range vc {
-		if v > other[k] {
-			return false
+func (vc VectorClock) HappensBefore(other VectorClock) bool {
+	lessOrEqual := true
+	strictlyLess := false
+
+	for p := range vc {
+		if vc[p] > other[p] {
+			lessOrEqual = false
+			break
+		}
+		if vc[p] < other[p] {
+			strictlyLess = true
 		}
 	}
-	return true
+	return lessOrEqual && strictlyLess
 }
 
 type Event struct {
-	ID        int
-	Type      EventType
-	Process   string
-	MessageID int
-	VClock    VectorClock
+	Type    EventType
+	Process string
+	VClock  VectorClock
 }
 
-type Trace []*Event
+type Trace []Event
 
-// ---------- Causal Graph ----------
+func (t Trace) String() string {
+	var result string
+	for i, e := range t {
+		result += fmt.Sprintf("e-%02d: %-4s on %s, VClock: %s\n",
+			i, e.Type.String(), e.Process, e.VClock.String())
+	}
+	return result
+}
+
+// ---------- causal graph ----------
 
 type CausalGraph struct {
-	Events map[int]*Event
-	Edges  map[int][]int // parent -> children
+	Events []Event
+	Edges  map[int][]int
 }
 
-func NewCausalGraph() *CausalGraph {
-	return &CausalGraph{
-		Events: make(map[int]*Event),
+func NewCausalGraph(trace Trace) *CausalGraph {
+	g := &CausalGraph{
+		Events: make([]Event, len(trace)),
 		Edges:  make(map[int][]int),
 	}
-}
+	copy(g.Events, trace)
 
-func BuildCausalGraph(trace Trace) *CausalGraph {
-	g := NewCausalGraph()
-	for _, e := range trace {
-		g.Events[e.ID] = e
-		g.Edges[e.ID] = []int{}
+	for i := range trace {
+		g.Edges[i] = []int{}
 	}
 
-	// Add edges according to vector clocks
-	for i, e1 := range trace {
+	for i := 0; i < len(trace); i++ {
 		for j := i + 1; j < len(trace); j++ {
+			e1 := trace[i]
 			e2 := trace[j]
-			if e1.VClock.LessOrEqual(e2.VClock) && !e2.VClock.LessOrEqual(e1.VClock) {
-				g.Edges[e1.ID] = append(g.Edges[e1.ID], e2.ID)
+			if e1.VClock.HappensBefore(e2.VClock) {
+				g.Edges[i] = append(g.Edges[i], j)
 			}
 		}
 	}
-
 	return g
 }
-
-// ---------- Transitive Reduction ----------
 
 func (g *CausalGraph) ReduceTransitive() {
 	topo := g.topoSort()
 	reachable := make(map[int]map[int]struct{})
 
-	// Iterate in reverse topological order
 	for i := len(topo) - 1; i >= 0; i-- {
 		u := topo[i]
 		if _, ok := reachable[u]; !ok {
@@ -111,13 +143,10 @@ func (g *CausalGraph) ReduceTransitive() {
 
 		newEdges := []int{}
 		for _, v := range g.Edges[u] {
-			// If v already reachable via another child, skip edge
 			if _, exists := reachable[u][v]; exists {
 				continue
 			}
 			newEdges = append(newEdges, v)
-
-			// Merge reachability of child into parent
 			for r := range reachable[v] {
 				reachable[u][r] = struct{}{}
 			}
@@ -126,8 +155,6 @@ func (g *CausalGraph) ReduceTransitive() {
 		g.Edges[u] = newEdges
 	}
 }
-
-// ---------- Topological Sort ----------
 
 func (g *CausalGraph) topoSort() []int {
 	indeg := make(map[int]int)
@@ -138,9 +165,9 @@ func (g *CausalGraph) topoSort() []int {
 	}
 
 	var q []int
-	for id := range g.Events {
-		if indeg[id] == 0 {
-			q = append(q, id)
+	for i := range g.Events {
+		if indeg[i] == 0 {
+			q = append(q, i)
 		}
 	}
 
@@ -159,19 +186,18 @@ func (g *CausalGraph) topoSort() []int {
 	return order
 }
 
-// ---------- Trace Generation ----------
+// ---------- trace generation ----------
 
 func GenerateAsyncTrace(processes []string, numEvents int) Trace {
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	trace := make(Trace, 0, numEvents)
 	processClocks := make(map[string]VectorClock)
-	pendingMessages := make(map[string][]*Event)
-	messageCounter := 0
+	pendingMessages := make(map[string][]Event)
 
 	for _, p := range processes {
 		processClocks[p] = NewVectorClock(processes)
-		pendingMessages[p] = []*Event{}
+		pendingMessages[p] = []Event{}
 	}
 
 	for len(trace) < numEvents {
@@ -183,17 +209,14 @@ func GenerateAsyncTrace(processes []string, numEvents int) Trace {
 			senderClock := processClocks[process]
 			senderClock[process]++
 
-			sendEvent := &Event{
-				ID:        len(trace),
-				Type:      EventSend,
-				Process:   process,
-				MessageID: messageCounter,
-				VClock:    senderClock.Copy(),
+			sendEvent := Event{
+				Type:    EventSend,
+				Process: process,
+				VClock:  DeepCopy(senderClock),
 			}
 
 			trace = append(trace, sendEvent)
 			pendingMessages[receiver] = append(pendingMessages[receiver], sendEvent)
-			messageCounter++
 
 		case EventReceive:
 			msgIdx := r.Intn(len(pendingMessages[process]))
@@ -207,12 +230,10 @@ func GenerateAsyncTrace(processes []string, numEvents int) Trace {
 			receiverClock[process]++
 			receiverClock.Merge(msg.VClock)
 
-			recvEvent := &Event{
-				ID:        len(trace),
-				Type:      EventReceive,
-				Process:   process,
-				MessageID: msg.MessageID,
-				VClock:    receiverClock.Copy(),
+			recvEvent := Event{
+				Type:    EventReceive,
+				Process: process,
+				VClock:  DeepCopy(receiverClock),
 			}
 
 			trace = append(trace, recvEvent)
@@ -221,7 +242,7 @@ func GenerateAsyncTrace(processes []string, numEvents int) Trace {
 	return trace
 }
 
-func getRandomProcessAction(processes []string, r *rand.Rand, pending map[string][]*Event) (string, EventType) {
+func getRandomProcessAction(processes []string, r *rand.Rand, pending map[string][]Event) (string, EventType) {
 	p := processes[r.Intn(len(processes))]
 	canReceive := len(pending[p]) > 0
 	action := EventSend
@@ -240,18 +261,11 @@ func getRandomOtherProcess(r *rand.Rand, processes []string, exclude string) str
 	}
 }
 
-// ---------- Display ----------
+// ---------- display ----------
 
 func (trace Trace) Print() {
 	fmt.Println("Trace:")
-	for _, e := range trace {
-		t := "SEND"
-		if e.Type == EventReceive {
-			t = "RECV"
-		}
-		fmt.Printf("Event %02d | %-5s | P:%s | Msg:%d | VC:%v\n",
-			e.ID, t, e.Process, e.MessageID, e.VClock)
-	}
+	fmt.Print(trace.String())
 }
 
 func (g *CausalGraph) Print() {
@@ -260,6 +274,7 @@ func (g *CausalGraph) Print() {
 		fmt.Printf("%02d -> %v\n", src, dsts)
 	}
 }
+
 func (g *CausalGraph) WriteDOT(filename string) error {
 	f, err := os.Create(filename)
 	if err != nil {
@@ -268,16 +283,10 @@ func (g *CausalGraph) WriteDOT(filename string) error {
 	defer f.Close()
 
 	fmt.Fprintln(f, "digraph G {")
-	// Nodes with labels like id:type:process
-	for id, e := range g.Events {
-		typ := "S"
-		if e.Type == EventReceive {
-			typ = "R"
-		}
-		label := fmt.Sprintf("%d:%s:%s", id, typ, e.Process)
-		fmt.Fprintf(f, "  %d [label=%q];\n", id, label)
+	for i, e := range g.Events {
+		label := fmt.Sprintf("%s:%s\n%s", e.Type.String(), e.Process, e.VClock.String())
+		fmt.Fprintf(f, "  %d [label=%q];\n", i, label)
 	}
-	// Edges
 	for u, dsts := range g.Edges {
 		for _, v := range dsts {
 			fmt.Fprintf(f, "  %d -> %d;\n", u, v)
@@ -287,12 +296,12 @@ func (g *CausalGraph) WriteDOT(filename string) error {
 	return nil
 }
 
+// ---------- main ----------
+
 func main() {
-	var (
-		nEvents    = 200
-		procsFlag  = "A,B,C,D"
-		printTrace = false
-	)
+	nEvents := 1000
+	procsFlag := "A,B,C,D"
+	printTrace := false
 
 	processes := strings.Split(procsFlag, ",")
 	for i := range processes {
@@ -312,15 +321,14 @@ func main() {
 	}
 
 	startBuild := time.Now()
-	graph := BuildCausalGraph(trace)
+	graph := NewCausalGraph(trace)
 	graph.ReduceTransitive()
 	buildDur := time.Since(startBuild)
 	graph.WriteDOT("dot")
 
-	// Compute edge statistics
 	totalEdges := 0
 	maxOut := 0
-	var sumOut int64 = 0
+	var sumOut int64
 	for _, dsts := range graph.Edges {
 		c := len(dsts)
 		totalEdges += c
@@ -329,17 +337,15 @@ func main() {
 			maxOut = c
 		}
 	}
-	avgOut := float64(0)
+	avgOut := 0.0
 	if len(graph.Events) > 0 {
 		avgOut = float64(sumOut) / float64(len(graph.Events))
 	}
 
-	// Longest path (critical path) via DP on topological order
 	topo := graph.topoSort()
 	dp := make(map[int]int, len(graph.Events))
 	longest := 0
 	for _, u := range topo {
-		// dp[u] is already the longest path length to u
 		for _, v := range graph.Edges[u] {
 			if dp[v] < dp[u]+1 {
 				dp[v] = dp[u] + 1
