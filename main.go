@@ -355,25 +355,53 @@ func (g *CausalGraph) WriteDOT(filename string) error {
 	return nil
 }
 
-// ---------- main ----------
+//-----------Traversal ----------
 
-func (g *CausalGraph) DFS(u int, visited map[int]bool) {
-	// Mark the current node as visited
-	visited[u] = true
+// The postcondition now accepts the original trigger event and the future event being checked.
+func (g *CausalGraph) CheckSafetyProperty(
+	precondition func(Event) bool,
+	postcondition func(triggerEvent, futureEvent Event) bool,
+) bool {
+	for i, event := range g.Events {
+		if precondition(event) {
+			specificPostcondition := func(futureEvent Event) bool {
+				return postcondition(event, futureEvent)
+			}
 
-	// Do your work on the actual event node 'u' here
-	// fmt.Printf("Visiting event: %d\n", u)
-
-	// Recurse for all adjacent vertices
-	for _, v := range g.Edges[u] {
-		if !visited[v] {
-			g.DFS(v, visited)
+			visited := make(map[int]bool)
+			if !g.verifyFuture(i, visited, specificPostcondition) {
+				fmt.Printf("Safety property violated! Precondition met at event %d, but postcondition failed in its future.\n", i)
+				return false
+			}
 		}
 	}
+	return true
 }
 
+// specificPostcondition closure which already has the context it needs.
+func (g *CausalGraph) verifyFuture(u int, visited map[int]bool, postcondition func(Event) bool) bool {
+	if visited[u] {
+		return true
+	}
+	visited[u] = true
+
+	if !postcondition(g.Events[u]) {
+		fmt.Printf("--> Postcondition failed at event %d: %s on %s, VClock: %s\n", u, g.Events[u].Type, g.Events[u].Process, g.Events[u].VClock)
+		return false
+	}
+
+	for _, v := range g.Edges[u] {
+		if !g.verifyFuture(v, visited, postcondition) {
+			return false
+		}
+	}
+	return true
+}
+
+// ---------- main ----------
+
 func main() {
-	nEvents := 100
+	nEvents := 1000
 	procsFlag := "A,B,C,D"
 	printTrace := false
 
@@ -400,15 +428,7 @@ func main() {
 	graph.ReduceTransitive()
 	buildDur := time.Since(startBuild)
 	graph.WriteDOT("dot")
-	visited := make(map[int]bool)
 
-	for _, sourceNode := range graph.Root {
-		if !visited[sourceNode] {
-			graph.DFS(sourceNode, visited)
-		}
-	}
-
-	fmt.Print("VISISTED:", len(visited))
 
 	totalEdges := 0
 	maxOut := 0
@@ -447,4 +467,30 @@ func main() {
 	fmt.Printf("  max out-degree: %d\n", maxOut)
 	fmt.Printf("  longest path length: %d\n", longest)
 	fmt.Printf("  build time (incl reduction): %s\n", buildDur)
+
+
+
+	precondition := func(e Event) bool {
+		return e.Process == "A" && e.Type == EventSend && e.VClock["A"] == 5
+	}
+
+	postcondition := func(triggerEvent, futureEvent Event) bool {
+		if maps.Equal(triggerEvent.VClock, futureEvent.VClock) {
+			return true
+		}
+		return triggerEvent.VClock.HappensBefore(futureEvent.VClock)
+	}
+
+	fmt.Println("\nChecking safety property: If A sends with clock A:5, all future events must happen after.")
+	startTest := time.Now()
+	propertyHolds := graph.CheckSafetyProperty(precondition, postcondition)
+	testDur := time.Since(startTest)
+
+	fmt.Printf("Safety property check completed (time: %s).\n", testDur)
+
+	if propertyHolds {
+		fmt.Println("Result: Safety property HOLDS.")
+	} else {
+		fmt.Println("Result: Safety property was VIOLATED.")
+	}
 }
