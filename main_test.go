@@ -198,7 +198,7 @@ func Test_Pen(t *testing.T) {
 	}
 
 	g.ReduceTransitive()
-		g.WriteDOT("dot")
+	g.WriteDOT("dot")
 
 	totalAfter := 0
 	for _, es := range g.Edges {
@@ -210,13 +210,17 @@ func Test_Pen(t *testing.T) {
 	}
 
 	expected := map[int][]int{
-		0: {1, 3},
-		1: {2},
-		2: {6},
-		3: {4},
-		4: {5},
-		5: {6},
-		6: {},
+		0:  {2},
+		1:  {3, 6},
+		2:  {6},
+		3:  {4},
+		4:  {5, 7},
+		5:  {10},
+		6:  {7},
+		7:  {8},
+		8:  {9},
+		9:  {10},
+		10: {},
 	}
 
 	for id, want := range expected {
