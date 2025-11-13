@@ -170,3 +170,56 @@ func TestCausalGraph_TransitiveReductionLarger(t *testing.T) {
 		}
 	}
 }
+
+func Test_Penis(t *testing.T) {
+	trace := Trace{
+		{Type: EventSend, Process: "A", VClock: VectorClock{"A": 1, "B": 0, "C": 0}},
+		{Type: EventSend, Process: "A", VClock: VectorClock{"A": 2, "B": 0, "C": 0}},
+		{Type: EventReceive, Process: "A", VClock: VectorClock{"A": 3, "B": 2, "C": 4}},
+		{Type: EventReceive, Process: "A", VClock: VectorClock{"A": 4, "B": 4, "C": 4}},
+
+		{Type: EventReceive, Process: "B", VClock: VectorClock{"A": 0, "B": 1, "C": 1}},
+		{Type: EventSend, Process: "B", VClock: VectorClock{"A": 0, "B": 2, "C": 1}},
+		{Type: EventSend, Process: "B", VClock: VectorClock{"A": 0, "B": 3, "C": 1}},
+
+		{Type: EventSend, Process: "C", VClock: VectorClock{"A": 0, "B": 0, "C": 1}},
+		{Type: EventReceive, Process: "C", VClock: VectorClock{"A": 2, "B": 0, "C": 2}},
+		{Type: EventReceive, Process: "C", VClock: VectorClock{"A": 2, "B": 2, "C": 3}},
+		{Type: EventSend, Process: "C", VClock: VectorClock{"A": 2, "B": 2, "C": 4}},
+	}
+
+	g := NewCausalGraph(trace)
+	g.WriteDOT("dot")
+	totalBefore := 0
+	for _, es := range g.Edges {
+		totalBefore += len(es)
+	}
+
+	g.ReduceTransitive()
+
+	totalAfter := 0
+	for _, es := range g.Edges {
+		totalAfter += len(es)
+	}
+
+	if totalAfter >= totalBefore {
+		t.Fatalf("expected some edges to be removed after reduction, got before=%d after=%d", totalBefore, totalAfter)
+	}
+
+	expected := map[int][]int{
+		0: {1, 3},
+		1: {2},
+		2: {6},
+		3: {4},
+		4: {5},
+		5: {6},
+		6: {},
+	}
+
+	for id, want := range expected {
+		got := g.Edges[id]
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("node %d: got %v want %v", id, got, want)
+		}
+	}
+}

@@ -72,15 +72,28 @@ func (vc VectorClock) HappensBefore(other VectorClock) bool {
 	lessOrEqual := true
 	strictlyLess := false
 
-	for p := range vc {
-		if vc[p] > other[p] {
+	// union of all process keys
+	keys := map[string]struct{}{}
+	for k := range vc {
+		keys[k] = struct{}{}
+	}
+	for k := range other {
+		keys[k] = struct{}{}
+	}
+
+	for p := range keys {
+		v1 := vc[p]
+		v2 := other[p]
+
+		if v1 > v2 {
 			lessOrEqual = false
 			break
 		}
-		if vc[p] < other[p] {
+		if v1 < v2 {
 			strictlyLess = true
 		}
 	}
+
 	return lessOrEqual && strictlyLess
 }
 
@@ -108,6 +121,7 @@ type CausalGraph struct {
 	Edges  map[int][]int
 }
 
+// Assumes it recives a trace that has been sorted by vector clock
 func NewCausalGraph(trace Trace) *CausalGraph {
 	g := &CausalGraph{
 		Events: make([]Event, len(trace)),
@@ -119,15 +133,14 @@ func NewCausalGraph(trace Trace) *CausalGraph {
 		g.Edges[i] = []int{}
 	}
 
-	for i := 0; i < len(trace); i++ {
-		for j := i + 1; j < len(trace); j++ {
-			e1 := trace[i]
-			e2 := trace[j]
-			if e1.VClock.HappensBefore(e2.VClock) {
+	for i := range trace {
+		for j := range trace {
+			if i != j && trace[i].VClock.HappensBefore(trace[j].VClock) {
 				g.Edges[i] = append(g.Edges[i], j)
 			}
 		}
 	}
+
 	return g
 }
 
@@ -299,7 +312,7 @@ func (g *CausalGraph) WriteDOT(filename string) error {
 // ---------- main ----------
 
 func main() {
-	nEvents := 1000
+	nEvents := 10000
 	procsFlag := "A,B,C,D"
 	printTrace := false
 
@@ -356,7 +369,7 @@ func main() {
 		}
 	}
 
-	fmt.Println("Causal graph built (with transitive reduction).")
+	fmt.Print(" Causal graph built (with transitive reduction).")
 	fmt.Printf("  nodes: %d\n", len(graph.Events))
 	fmt.Printf("  direct edges: %d\n", totalEdges)
 	fmt.Printf("  avg out-degree: %.3f\n", avgOut)
