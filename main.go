@@ -106,7 +106,6 @@ func sumVC(vc VectorClock) int {
 	return sum
 }
 
-
 type Event struct {
 	Type    EventType
 	Process string
@@ -129,16 +128,21 @@ func (t Trace) String() string {
 type CausalGraph struct {
 	Events []Event
 	Edges  map[int][]int
+	Root   []int
 }
 
 // Assumes it recives a trace that has been sorted by vector clock
 
 func NewCausalGraph(trace Trace) *CausalGraph {
+	numEvents := len(trace)
 	g := &CausalGraph{
-		Events: make([]Event, len(trace)),
+		Events: make([]Event, numEvents),
 		Edges:  make(map[int][]int),
+		Root:   []int{},
 	}
 	copy(g.Events, trace)
+
+	inDegree := make([]int, numEvents)
 
 	for i := range trace {
 		g.Edges[i] = []int{}
@@ -148,11 +152,20 @@ func NewCausalGraph(trace Trace) *CausalGraph {
 		for j := i + 1; j < len(trace); j++ {
 			if trace[i].VClock.HappensBefore(trace[j].VClock) {
 				g.Edges[i] = append(g.Edges[i], j)
+				inDegree[j]++
 			} else if trace[j].VClock.HappensBefore(trace[i].VClock) {
 				g.Edges[j] = append(g.Edges[j], i)
+				inDegree[i]++
 			}
 		}
 	}
+
+	for i := range numEvents {
+		if inDegree[i] == 0 {
+			g.Root = append(g.Root, i)
+		}
+	}
+
 	return g
 }
 
@@ -287,8 +300,8 @@ func getRandomOtherProcess(r *rand.Rand, processes []string, exclude string) str
 }
 
 func sortTraceByVClock(trace Trace) Trace {
-    sorted := make(Trace, len(trace))
-    copy(sorted, trace)
+	sorted := make(Trace, len(trace))
+	copy(sorted, trace)
 
 	slices.SortStableFunc(sorted, func(e1, e2 Event) int {
 		sum1 := sumVC(e1.VClock)
@@ -304,7 +317,7 @@ func sortTraceByVClock(trace Trace) Trace {
 		}
 		return 0
 	})
-    return sorted
+	return sorted
 }
 
 // ---------- display ----------
@@ -344,8 +357,23 @@ func (g *CausalGraph) WriteDOT(filename string) error {
 
 // ---------- main ----------
 
+func (g *CausalGraph) DFS(u int, visited map[int]bool) {
+	// Mark the current node as visited
+	visited[u] = true
+
+	// Do your work on the actual event node 'u' here
+	// fmt.Printf("Visiting event: %d\n", u)
+
+	// Recurse for all adjacent vertices
+	for _, v := range g.Edges[u] {
+		if !visited[v] {
+			g.DFS(v, visited)
+		}
+	}
+}
+
 func main() {
-	nEvents := 10000
+	nEvents := 100
 	procsFlag := "A,B,C,D"
 	printTrace := false
 
@@ -372,6 +400,15 @@ func main() {
 	graph.ReduceTransitive()
 	buildDur := time.Since(startBuild)
 	graph.WriteDOT("dot")
+	visited := make(map[int]bool)
+
+	for _, sourceNode := range graph.Root {
+		if !visited[sourceNode] {
+			graph.DFS(sourceNode, visited)
+		}
+	}
+
+	fmt.Print("VISISTED:", len(visited))
 
 	totalEdges := 0
 	maxOut := 0
