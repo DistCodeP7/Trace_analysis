@@ -360,12 +360,10 @@ func (g *CausalGraph) WriteDOT(filename string) error {
 
 func (g *CausalGraph) CheckSafetyProperty(
 	precondition func(Event) bool,
-	// The postcondition now receives the trigger's ID and the future event's ID and data.
 	postcondition func(triggerID int, triggerEvent Event, futureID int, futureEvent Event) bool,
 ) bool {
 	for i, event := range g.Events {
 		if precondition(event) {
-			// Create a closure that captures the trigger's ID (i) and data (event).
 			specificPostcondition := func(futureID int, futureEvent Event) bool {
 				return postcondition(i, event, futureID, futureEvent)
 			}
@@ -391,7 +389,6 @@ func (g *CausalGraph) verifyFuture(u int, visited map[int]bool, postcondition fu
 	}
 	visited[u] = true
 
-	// Pass the current node's ID 'u' and its data 'g.Events[u]' to the postcondition.
 	if !postcondition(u, g.Events[u]) {
 		fmt.Printf("--> Postcondition failed at event %d: %s on %s, VClock: %s\n", u, g.Events[u].Type, g.Events[u].Process, g.Events[u].VClock)
 		return false
@@ -482,14 +479,12 @@ func main() {
 		return e.Process == "A" && e.Type == EventSend && e.VClock["A"] == 5
 	}
 
-	// Use the new, robust signature for the postcondition.
 	postcondition := func(triggerID int, triggerEvent Event, futureID int, futureEvent Event) bool {
 		return triggerEvent.VClock.HappensBefore(futureEvent.VClock)
 	}
 
 	fmt.Println("\nChecking safety property: If A sends with clock A:5, all future events must happen after.")
 	startTest := time.Now()
-	// The call remains the same.
 	propertyHolds := graph.CheckSafetyProperty(precondition, postcondition)
 	testDur := time.Since(startTest)
 
