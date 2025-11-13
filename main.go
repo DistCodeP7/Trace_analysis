@@ -5,6 +5,7 @@ import (
 	"maps"
 	"math/rand"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -97,6 +98,15 @@ func (vc VectorClock) HappensBefore(other VectorClock) bool {
 	return lessOrEqual && strictlyLess
 }
 
+func sumVC(vc VectorClock) int {
+	sum := 0
+	for _, v := range vc {
+		sum += v
+	}
+	return sum
+}
+
+
 type Event struct {
 	Type    EventType
 	Process string
@@ -122,6 +132,7 @@ type CausalGraph struct {
 }
 
 // Assumes it recives a trace that has been sorted by vector clock
+
 func NewCausalGraph(trace Trace) *CausalGraph {
 	g := &CausalGraph{
 		Events: make([]Event, len(trace)),
@@ -134,13 +145,14 @@ func NewCausalGraph(trace Trace) *CausalGraph {
 	}
 
 	for i := range trace {
-		for j := range trace {
-			if i != j && trace[i].VClock.HappensBefore(trace[j].VClock) {
+		for j := i + 1; j < len(trace); j++ {
+			if trace[i].VClock.HappensBefore(trace[j].VClock) {
 				g.Edges[i] = append(g.Edges[i], j)
+			} else if trace[j].VClock.HappensBefore(trace[i].VClock) {
+				g.Edges[j] = append(g.Edges[j], i)
 			}
 		}
 	}
-
 	return g
 }
 
@@ -274,6 +286,27 @@ func getRandomOtherProcess(r *rand.Rand, processes []string, exclude string) str
 	}
 }
 
+func sortTraceByVClock(trace Trace) Trace {
+    sorted := make(Trace, len(trace))
+    copy(sorted, trace)
+
+	slices.SortStableFunc(sorted, func(e1, e2 Event) int {
+		sum1 := sumVC(e1.VClock)
+		sum2 := sumVC(e2.VClock)
+		if sum1 != sum2 {
+			return sum1 - sum2
+		}
+
+		if e1.Process < e2.Process {
+			return -1
+		} else if e1.Process > e2.Process {
+			return 1
+		}
+		return 0
+	})
+    return sorted
+}
+
 // ---------- display ----------
 
 func (trace Trace) Print() {
@@ -334,7 +367,8 @@ func main() {
 	}
 
 	startBuild := time.Now()
-	graph := NewCausalGraph(trace)
+	sortedTrace := sortTraceByVClock(trace)
+	graph := NewCausalGraph(sortedTrace)
 	graph.ReduceTransitive()
 	buildDur := time.Since(startBuild)
 	graph.WriteDOT("dot")

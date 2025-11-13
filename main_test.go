@@ -171,7 +171,7 @@ func TestCausalGraph_TransitiveReductionLarger(t *testing.T) {
 	}
 }
 
-func Test_Penis(t *testing.T) {
+func Test_Pen(t *testing.T) {
 	trace := Trace{
 		{Type: EventSend, Process: "A", VClock: VectorClock{"A": 1, "B": 0, "C": 0}},
 		{Type: EventSend, Process: "A", VClock: VectorClock{"A": 2, "B": 0, "C": 0}},
@@ -188,14 +188,17 @@ func Test_Penis(t *testing.T) {
 		{Type: EventSend, Process: "C", VClock: VectorClock{"A": 2, "B": 2, "C": 4}},
 	}
 
+	trace = sortTraceByVClock(trace)
+
 	g := NewCausalGraph(trace)
-	g.WriteDOT("dot")
+
 	totalBefore := 0
 	for _, es := range g.Edges {
 		totalBefore += len(es)
 	}
 
 	g.ReduceTransitive()
+		g.WriteDOT("dot")
 
 	totalAfter := 0
 	for _, es := range g.Edges {
