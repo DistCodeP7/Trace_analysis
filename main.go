@@ -362,16 +362,16 @@ func (g *CausalGraph) CheckSafetyProperty(
 	precondition func(Event) bool,
 	postcondition func(triggerID int, triggerEvent Event, futureID int, futureEvent Event, hasVisited map[int]bool) bool,
 ) bool {
-	visited := make(map[int]bool)
 	for i, event := range g.Events {
-		visited[i] = true
 		if precondition(event) {
 			specificPostcondition := func(futureID int, futureEvent Event, hasVisited map[int]bool) bool {
 				return postcondition(i, event, futureID, futureEvent, hasVisited)
 			}
 
 			for _, l := range g.Edges[i] {
-			if !g.verifyFuture(l, visited, specificPostcondition) {
+				newvisited := make(map[int]bool)
+				newvisited[i] = true
+			if !g.verifyFuture(l, newvisited, specificPostcondition) {
 				fmt.Printf(
 					"Safety property violated! Precondition met at event %d (%s on %s), but postcondition failed in its future.\n",
 					i, event.Type, event.Process,
@@ -406,7 +406,7 @@ func (g *CausalGraph) verifyFuture(u int, visited map[int]bool, postcondition fu
 // ---------- main ----------
 
 func main() {
-	nEvents := 1000
+	nEvents := 30
 	procsFlag := "A,B,C,D"
 	printTrace := false
 
@@ -465,6 +465,7 @@ func main() {
 		}
 	}
 
+
 	fmt.Print(" Causal graph built (with transitive reduction).")
 	fmt.Printf("  nodes: %d\n", len(graph.Events))
 	fmt.Printf("  direct edges: %d\n", totalEdges)
@@ -474,14 +475,27 @@ func main() {
 	fmt.Printf("  build time (incl reduction): %s\n", buildDur)
 
 
-
 	
 	precondition := func(e Event) bool {
 		return e.Process == "A" && e.Type == EventSend && e.VClock["A"] == 5
 	}
 
 	postcondition := func(triggerID int, triggerEvent Event, futureID int, futureEvent Event, hasVisited map[int]bool) bool {
-		return triggerEvent.VClock.HappensBefore(futureEvent.VClock)
+		
+
+			for visitedID := range hasVisited {
+				if visitedID == triggerID || visitedID == futureID {
+					continue
+				}
+				visitedEvent := graph.Events[visitedID]
+				if !triggerEvent.VClock.HappensBefore(visitedEvent.VClock) {
+					fmt.Println("Failed with event", visitedEvent)
+					return false
+				}
+			}
+
+		
+		return true
 	}
 
 	fmt.Println("\nChecking safety property: If A sends with clock A:5, all future events must happen after.")
