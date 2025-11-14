@@ -360,15 +360,16 @@ func (g *CausalGraph) WriteDOT(filename string) error {
 
 func (g *CausalGraph) CheckSafetyProperty(
 	precondition func(Event) bool,
-	postcondition func(triggerID int, triggerEvent Event, futureID int, futureEvent Event) bool,
+	postcondition func(triggerID int, triggerEvent Event, futureID int, futureEvent Event, hasVisited map[int]bool) bool,
 ) bool {
+	visited := make(map[int]bool)
 	for i, event := range g.Events {
+		visited[i] = true
 		if precondition(event) {
-			specificPostcondition := func(futureID int, futureEvent Event) bool {
-				return postcondition(i, event, futureID, futureEvent)
+			specificPostcondition := func(futureID int, futureEvent Event, hasVisited map[int]bool) bool {
+				return postcondition(i, event, futureID, futureEvent, hasVisited)
 			}
 
-			visited := make(map[int]bool)
 			for _, l := range g.Edges[i] {
 			if !g.verifyFuture(l, visited, specificPostcondition) {
 				fmt.Printf(
@@ -383,13 +384,13 @@ func (g *CausalGraph) CheckSafetyProperty(
 	return true
 }
 
-func (g *CausalGraph) verifyFuture(u int, visited map[int]bool, postcondition func(futureID int, futureEvent Event) bool) bool {
+func (g *CausalGraph) verifyFuture(u int, visited map[int]bool, postcondition func(futureID int, futureEvent Event, hasVisited map[int]bool) bool) bool {
 	if visited[u] {
 		return true
 	}
 	visited[u] = true
 
-	if !postcondition(u, g.Events[u]) {
+	if !postcondition(u, g.Events[u], visited) {
 		fmt.Printf("--> Postcondition failed at event %d: %s on %s, VClock: %s\n", u, g.Events[u].Type, g.Events[u].Process, g.Events[u].VClock)
 		return false
 	}
@@ -479,7 +480,7 @@ func main() {
 		return e.Process == "A" && e.Type == EventSend && e.VClock["A"] == 5
 	}
 
-	postcondition := func(triggerID int, triggerEvent Event, futureID int, futureEvent Event) bool {
+	postcondition := func(triggerID int, triggerEvent Event, futureID int, futureEvent Event, hasVisited map[int]bool) bool {
 		return triggerEvent.VClock.HappensBefore(futureEvent.VClock)
 	}
 
